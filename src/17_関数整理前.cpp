@@ -455,42 +455,16 @@ void extractGreenSignal(cv::Mat &rgb, cv::Mat &hsv, cv::Mat &extract_green)
 /* 抽出した色を白くし、二値化する関数 */
 void binalizeImage(cv::Mat &src, cv::Mat &gray_img)
 {
-  for(int y = 0; y<src.rows; y++)
-  {
-    for(int x = 0; x<src.cols; x++)
+    for(int y = 0; y<src.rows; y++)
     {
-      if(src.at<cv::Vec3b>(y,x)!=cv::Vec3b(0, 0, 0))
-      {
-        gray_img.at<uchar>(y,x) = 255;
-      }
+        for(int x = 0; x<src.cols; x++)
+        {
+            if(src.at<cv::Vec3b>(y,x)!=cv::Vec3b(0, 0, 0))
+            {
+                gray_img.at<uchar>(y,x) = 255;
+            }
+        }
     }
-  }
-}
-
-void createCandidateArea(Mat &src, const Mat &labeled, const Mat &stats, const Mat &centroids, vector<int> &left, vector<int> &top, vector<int> &width, vector<int> &height, const vector<int> &pts1_x_region, const vector<int> &pts1_y_region, int num_labels, int region_num, string color_type)
-{
-  for (int label = 1; label < num_labels; label++)
-  {
-    top[label] = stats.at<int>(label, cv::CC_STAT_TOP);
-    left[label] = stats.at<int>(label, cv::CC_STAT_LEFT);
-    width[label] = stats.at<int>(label, cv::CC_STAT_WIDTH);
-    height[label] = stats.at<int>(label, cv::CC_STAT_HEIGHT);
-    
-    // ピンク色の矩形を描く
-    // ピクセル数とアスペクト比を見る
-    pixel_num = width[label] * height[label];
-    aspect_ratio = ((double)width[label])/((double)height[label]);
-    if(pixel_num<MIN_PIX_NUM || pixel_num>MAX_PIX_NUM)
-    {
-      continue;
-    }
-    if(aspect_ratio<MIN_ASPECT_RATIO || aspect_ratio>MAX_ASPECT_RATIO)
-    {
-      continue;
-    }
-    if(color_type == "red") cv::rectangle(src, cv::Rect(left[label] + pts1_x_region[region_num], top[label] + pts1_y_region[region_num], width[label], height[label]), cv::Scalar(255,0,255), 2);
-    else if(color_type == "green") cv::rectangle(src, cv::Rect(left[label] + pts1_x_region[region_num], top[label] + pts1_y_region[region_num], width[label], height[label]), cv::Scalar(255,255,0), 2);
-  }
 }
 
 /* ピンク色または水色の中に黄色が見えたら赤or青色の矩形でラベリングする関数 */
@@ -526,7 +500,6 @@ void extractYellowInBlob(cv::Mat &rgb, cv::Mat &bin_img, int num_labels, const s
 
     cv::Mat extract_yellow = cv::Mat::zeros(blob_rgb.size(), blob_rgb.type());
     cv::medianBlur(blob_hsv, blob_hsv, 3);
-    int yellow_pix_cnt = 0;
     for (int y = 0; y < blob_hsv.rows; y++)
     {
       for (int x = 0; x < blob_hsv.cols; x++)
@@ -537,7 +510,6 @@ void extractYellowInBlob(cv::Mat &rgb, cv::Mat &bin_img, int num_labels, const s
             && (MIN_V_YELLOW <= val[2] && val[2] <= MAX_V_YELLOW))
         {
           extract_yellow.at<cv::Vec3b>(y, x) = blob_rgb.at<cv::Vec3b>(y, x);
-          yellow_pix_cnt++;
         }
       }
     }
@@ -564,7 +536,7 @@ void extractYellowInBlob(cv::Mat &rgb, cv::Mat &bin_img, int num_labels, const s
       // cv::rectangle(bin_img_yellow, cv::Rect(yellow_left, yellow_top, yellow_width, yellow_height), cv::Scalar(256/2), 2);
       if (isRedSignal)
       {
-        if(num_labels_yellow > 1 && yellow_pix_cnt >= 8){
+        if(num_labels_yellow > 1){
           cv::rectangle(rgb, cv::Rect(left + pts1_x_region[region_num], top + pts1_y_region[region_num], width, height), cv::Scalar(0, 0, 255), 2); // 赤信号は赤い矩形
           // cv::rectangle(region_img, cv::Rect(left, top, width, height),cv::Scalar(0, 0, 255), 2);
           red_light_flag = true;
@@ -572,7 +544,7 @@ void extractYellowInBlob(cv::Mat &rgb, cv::Mat &bin_img, int num_labels, const s
       }
       else
       {
-        if(num_labels_yellow > 1 && yellow_pix_cnt >= 8){
+        if(num_labels_yellow > 1){
           cv::rectangle(rgb, cv::Rect(left + pts1_x_region[region_num], top + pts1_y_region[region_num], width, height), cv::Scalar(255, 0, 0), 2); // 青信号は青い矩形
           // cv::rectangle(region_img, cv::Rect(left, top, width, height),cv::Scalar(255, 0, 0), 2);
           green_light_flag = true;
@@ -666,6 +638,8 @@ int main(int argc,char **argv){
     vector<LidarData> src_points;
     vector<LidarData> points;
     TrackableObstacle obstacle;
+    Mat obstacle_now;
+    Mat obstacle_past;
     vector<int> pts1_x_sign, pts1_y_sign, pts2_x_sign, pts2_y_sign;
     vector<int> pts1_x_region, pts1_y_region, pts2_x_region, pts2_y_region;
 
@@ -689,6 +663,11 @@ int main(int argc,char **argv){
     rotatePoints(src_points, degToRad(ROLL), degToRad(PITCH), degToRad(YAW), points);
     /*** 反射強度画像，距離画像の作成 ***/
     detect(points, obstacle);
+
+    int now_obs_cnt;
+
+    // drawCorresponding(obstacle_now, obstacle_past, now_obs_cnt);
+    now_obs_cnt_sum += now_obs_cnt;
 
     drawObjectsReflect(obstacle, lidar_reflect_img);
     drawObjectsRange(obstacle, lidar_range_img);
@@ -719,51 +698,109 @@ int main(int argc,char **argv){
       extractGreenSignal(region_img, hsv, extract_green);
  
 
-      // 二値化
-      cv::Mat bin_img_red = cv::Mat::zeros(region_img.size(), CV_8UC1);
-      cv::Mat bin_img_green = cv::Mat::zeros(region_img.size(), CV_8UC1);
-      binalizeImage(extract_red, bin_img_red);
-      binalizeImage(extract_green, bin_img_green);
-
       // メディアンフィルターにかける
       cv::Mat red_median(region_img.size(), region_img.type(), cv::Scalar(0, 0, 0));
       cv::Mat green_median(region_img.size(), region_img.type(), cv::Scalar(0, 0, 0));
-      cv::medianBlur(bin_img_red, red_median, 3);
-      cv::medianBlur(bin_img_green, green_median, 3);
+      cv::medianBlur(extract_red, red_median, 3);
+      cv::medianBlur(extract_green, green_median, 3);
+
+      // 二値化
+      cv::Mat bin_img_red = cv::Mat::zeros(region_img.size(), CV_8UC1);
+      cv::Mat bin_img_green = cv::Mat::zeros(region_img.size(), CV_8UC1);
+      binalizeImage(red_median, bin_img_red);
+      binalizeImage(green_median, bin_img_green);
 
       // 膨張処理
       cv::Mat kernel_dilate = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
-      Mat red_dilate = cv::Mat::zeros(bin_img_red.size(), bin_img_red.type());
-      Mat green_dilate = cv::Mat::zeros(bin_img_green.size(), bin_img_green.type());
-      cv::dilate(bin_img_red, red_dilate, kernel_dilate);
-      cv::dilate(bin_img_green, green_dilate, kernel_dilate);
+      cv::dilate(bin_img_red, bin_img_red, kernel_dilate);
+      cv::dilate(bin_img_green, bin_img_green, kernel_dilate);
+
+      // cv::imshow("bin_img_red", bin_img_red);
+      // cv::imshow("bin_img_green", bin_img_green);
 
       // ラベリング
       cv::Mat labeled_red, labeled_green;
       cv::Mat stats_red, states_green, centroids_red, centroids_green;
       int num_labels_red, num_labels_green;
-      string color_type;
 
-      num_labels_red = cv::connectedComponentsWithStats(red_dilate, labeled_red, stats_red, centroids_red);
-      std::vector<int> red_width(num_labels_red), red_height(num_labels_red), red_left(num_labels_red), red_top(num_labels_red);
-      color_type = "red";
-      createCandidateArea(camera_img, labeled_red, stats_red, centroids_red, red_left, red_top, red_width, red_height, pts1_x_region, pts1_y_region,  num_labels_red, region_num, color_type);
+      num_labels_red = cv::connectedComponentsWithStats(bin_img_red, labeled_red, stats_red, centroids_red);
+      std::vector<int> red_width, red_height, red_left, red_top;
+      for (int label = 0; label < num_labels_red; label++)
+      {
+        int left = stats_red.at<int>(label, cv::CC_STAT_LEFT);
+        int top = stats_red.at<int>(label, cv::CC_STAT_TOP);
+        int width = stats_red.at<int>(label, cv::CC_STAT_WIDTH);
+        int height = stats_red.at<int>(label, cv::CC_STAT_HEIGHT);
 
-      num_labels_green = cv::connectedComponentsWithStats(green_dilate, labeled_green, states_green, centroids_green);
-      std::vector<int> green_width(num_labels_green), green_height(num_labels_green), green_left(num_labels_green), green_top(num_labels_green);
-      color_type = "green";
-      createCandidateArea(camera_img, labeled_green, states_green, centroids_green, green_left, green_top, green_width, green_height, pts1_x_region, pts1_y_region,  num_labels_green, region_num, color_type);
+        red_left.push_back(left);
+        red_top.push_back(top);
+        red_width.push_back(width);
+        red_height.push_back(height);
 
-      extractYellowInBlob(camera_img, red_dilate, num_labels_red, red_width, red_height, red_left, red_top, true,
+        // cv::rectangle(bin_img_red, cv::Rect(left, top, width, height), cv::Scalar(256/2), 2);
+        // ピンク色の矩形を描く
+        // ピクセル数とアスペクト比を見る
+        pixel_num = width * height;
+        // std::cout << "pixel_num_red : " << pixel_num << std::endl;
+        aspect_ratio = ((double)width)/((double)height);
+        // std::cout << "aspect_ratio_red : " << aspect_ratio << std::endl;
+        if(pixel_num<MIN_PIX_NUM || pixel_num>MAX_PIX_NUM)
+        {
+          continue;
+        }
+        if(aspect_ratio<MIN_ASPECT_RATIO || aspect_ratio>MAX_ASPECT_RATIO)
+        {
+          continue;
+        }
+        cv::rectangle(camera_img, cv::Rect(red_left[label] + pts1_x_region[region_num], red_top[label] + pts1_y_region[region_num], red_width[label], red_height[label]), cv::Scalar(255,0,255), 2);
+        // cv::rectangle(region_img, cv::Rect(red_left[label], red_top[label], red_width[label], red_height[label]), cv::Scalar(255,0,255), 2);
+        // cout << "pts1_x_region[" << region_num << "]: " << pts1_x_region[region_num] << endl;
+        // cout << "pts1_y_region[" << region_num << "]: " << pts1_y_region[region_num] << endl;
+      }
+
+      num_labels_green = cv::connectedComponentsWithStats(bin_img_green, labeled_green, states_green, centroids_green);
+      std::vector<int> green_width, green_height, green_left, green_top;
+      for (int label = 0; label < num_labels_green; label++)
+      {
+        int width = states_green.at<int>(label, cv::CC_STAT_WIDTH);
+        int height = states_green.at<int>(label, cv::CC_STAT_HEIGHT);
+        int left = states_green.at<int>(label, cv::CC_STAT_LEFT);
+        int top = states_green.at<int>(label, cv::CC_STAT_TOP);
+
+        green_width.push_back(width);
+        green_height.push_back(height);
+        green_left.push_back(left);
+        green_top.push_back(top);
+
+        // cv::rectangle(bin_img_green, cv::Rect(left, top, width, height), cv::Scalar(256/2), 2);
+        // 水色の矩形を描く
+        // ピクセル数、アスペクト比を見る
+        pixel_num = width * height;
+        // cout << "pixel_num_green : " << pixel_num << std::endl;
+        aspect_ratio = ((double)width) / ((double)height);
+        // cout << "aspect_ratio_green : " << aspect_ratio << std::endl;
+        if(pixel_num<MIN_PIX_NUM || pixel_num>MAX_PIX_NUM)
+        {
+          continue;
+        }
+        if(aspect_ratio<MIN_ASPECT_RATIO || aspect_ratio>MAX_ASPECT_RATIO)
+        {
+          continue;
+        }
+        cv::rectangle(camera_img, cv::Rect(green_left[label] + pts1_x_region[region_num], green_top[label] + pts1_y_region[region_num], green_width[label], green_height[label]), cv::Scalar(255,255,0), 2);
+        // cv::rectangle(region_img, cv::Rect(green_left[label], green_top[label], green_width[label], green_height[label]), cv::Scalar(255,255,0), 2);
+      }
+
+      extractYellowInBlob(camera_img, bin_img_red, num_labels_red, red_width, red_height, red_left, red_top, true,
                             pts1_x_region, pts1_y_region, region_img, region_num);
-      extractYellowInBlob(camera_img, green_dilate, num_labels_green, green_width, green_height, green_left, green_top, false,
+      extractYellowInBlob(camera_img, bin_img_green, num_labels_green, green_width, green_height, green_left, green_top, false,
                             pts1_x_region, pts1_y_region, region_img, region_num);
 
       // 赤、青信号が連続で検出されるほどcountが加算されていく
       // red_light_flag, greem_light_flagはextractYellowBlob関数から出力されている
       if(red_light_flag)
       {
-        red_cnt++;
+        ++red_cnt;
       }
       else
       {
@@ -771,7 +808,7 @@ int main(int argc,char **argv){
       }
       if(green_light_flag)
       {
-        green_cnt++;
+        ++green_cnt;
       }
       else
       {
@@ -782,7 +819,7 @@ int main(int argc,char **argv){
         drawOverlay(camera_img, red_light_flag, green_light_flag);
         light_msg_state = "RedLight";
         addTextToImage(camera_img, light_msg_state);
-        red_cnt = 0;
+        red_cnt=0;
       }
       if(green_cnt>GREEN_IMAGE_THRESH)
       {
@@ -797,15 +834,19 @@ int main(int argc,char **argv){
       // cv::imshow("region_img", region_img);
     }
 
+    
     imshow("camera_img", camera_img);
     imshow("lidar_range_img", lidar_range_img);
     imshow("lidar_reflect_img", lidar_reflect_img);
+    cv:imwrite("/home/chiba/share/imgs/a/green_success.png", camera_img);
+    // imshow("obstacle now", obstacle_now);
+    // imshow("obstacle past", obstacle_past);
     int key = waitKey(0);
     if(key == ' ') break;
-    else if(key == 'a') file_cnt--;
+    else if(key == 'a') --file_cnt;
     else if(key == 'A') file_cnt -= 10;
     else if(key == 'D') file_cnt += 10;
-    else if(key == 'd') file_cnt++;
+    else if(key == 'd') ++file_cnt;
     if(file_cnt < 0) file_cnt = 0;
   }
   return 0;
