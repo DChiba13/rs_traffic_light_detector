@@ -105,6 +105,8 @@ double aspect_ratio = .0f;
 constexpr double MIN_ASPECT_RATIO = 0.6;
 constexpr double MAX_ASPECT_RATIO = 1.6;
 
+constexpr int YELLOW_PIX_TH = 8; // 候補領域内の黄色画素ピクセル数の閾値
+
 vector<TrackableObstacle> obstacles_buffer;
 vector<vector<LidarData>> points_buffer;
 
@@ -564,7 +566,7 @@ void extractYellowInBlob(cv::Mat &rgb, cv::Mat &bin_img, int num_labels, const s
       // cv::rectangle(bin_img_yellow, cv::Rect(yellow_left, yellow_top, yellow_width, yellow_height), cv::Scalar(256/2), 2);
       if (isRedSignal)
       {
-        if(num_labels_yellow > 1 && yellow_pix_cnt >= 8){
+        if(num_labels_yellow > 1 && yellow_pix_cnt >= YELLOW_PIX_TH){
           cv::rectangle(rgb, cv::Rect(left + pts1_x_region[region_num], top + pts1_y_region[region_num], width, height), cv::Scalar(0, 0, 255), 2); // 赤信号は赤い矩形
           // cv::rectangle(region_img, cv::Rect(left, top, width, height),cv::Scalar(0, 0, 255), 2);
           red_light_flag = true;
@@ -572,7 +574,7 @@ void extractYellowInBlob(cv::Mat &rgb, cv::Mat &bin_img, int num_labels, const s
       }
       else
       {
-        if(num_labels_yellow > 1 && yellow_pix_cnt >= 8){
+        if(num_labels_yellow > 1 && yellow_pix_cnt >= YELLOW_PIX_TH){
           cv::rectangle(rgb, cv::Rect(left + pts1_x_region[region_num], top + pts1_y_region[region_num], width, height), cv::Scalar(255, 0, 0), 2); // 青信号は青い矩形
           // cv::rectangle(region_img, cv::Rect(left, top, width, height),cv::Scalar(255, 0, 0), 2);
           green_light_flag = true;
