@@ -4,23 +4,25 @@
 #include <ryusei/common/logger.hpp>
 #include <ryusei/common/defs.hpp>
 #include <ryusei/common/math.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/ini_parser.hpp>
 #include <fstream>
-
 
 using namespace project_ryusei;
 using namespace cv;
 using namespace std;
+namespace prop = boost::property_tree;
 namespace pr = project_ryusei;
 #define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
 namespace fs = std::experimental::filesystem;
 
 // 点群をカメラ画像の座標に合わせる(回転させる)関数のパラメータ
-#define X_DIFF 0.1
-#define Y_DIFF 0.0
-#define Z_DIFF -0.085
-#define ROLL 0.0
-#define PITCH 0.8
-#define YAW -2.5
+double X_DIFF;
+double Y_DIFF;
+double Z_DIFF;
+double ROLL;
+double PITCH;
+double YAW;
 
 #define DEG_TO_RAD (M_PI / 180.0)
 /* 青Mercury 3D-lidar : pandar_40 */
@@ -37,55 +39,50 @@ constexpr double LIDAR_RESOLUTION_V = 1.0 * DEG_TO_RAD; // LiDARの垂直解像�
 constexpr double CAMERA_RESOLUTION_H = (double)(((389/2) - 140) * LIDAR_RESOLUTION_H) / (double)304; // カメラの1[pix]あたりの角度[rad]
 constexpr double CAMERA_RESOLUTION_V = (double)(((89/2) - 14) * LIDAR_RESOLUTION_V) / (double)193; // カメラの1[pix]あたりの角度[rad]
 
-constexpr double DETECT_HEIGHT_MIN = 2; // 障害物の高さ(最小)
-constexpr double DETECT_HEIGHT_MAX = 4; // 障害物の高さ(最大)
-constexpr double LIDAR_HEIGHT = 0.97; // LiDARの取り付け高さ
-constexpr double REFLECT_THRESH = 0.9f; // 反射強度の閾値
-constexpr double MIN_RANGE = 5.0f; // 投影する距離の最小値
-constexpr double MAX_RANGE = 15.0f; // 投影する距離の最大値
-constexpr double MAX_REFLECT = 1.0f; // 投影する反射強度の最大値
-constexpr double CLUSTERING_DISTANCE = 0.5; // 同一物体と判断する距離
-constexpr double MIN_OBJECT_SIZE = 50; // 検出する物体の最小の画素数
-constexpr int FEATURE_HOG_BIN_NUM = 60; // HOGのビンの数
-constexpr int FEATURE_REF_BIN_NUM = 50; // 反射強度ヒストグラムのビンの数
-constexpr double MATCH_THRESHOLD = 0.7; // マッチ判定の閾値
-constexpr int OBSTACLE_BUFFER_SIZE = 2; // バッファとして確保する過去の障害物の数
-constexpr int MIN_PIX_NUM_SIGN = 20; // 標識と判定するピクセル数の最小
-constexpr int MAX_PIX_NUM_SIGN = 80; // 標識と判定するピクセル数の最大
-constexpr double MIN_ASPECT_RATIO_SIGN = 0.2; // 標識と判定するアスペクト比の最小
-constexpr double MAX_ASPECT_RATIO_SIGN = 0.8; // 標識と判定するアスペクト比の最大
+double DETECT_HEIGHT_MIN; // 障害物の高さ(最小)
+double DETECT_HEIGHT_MAX; // 障害物の高さ(最大)
+double LIDAR_HEIGHT; // LiDARの取り付け高さ
+double REFLECT_THRESH; // 反射強度の閾値
+double MIN_RANGE; // 投影する距離の最小値
+double MAX_RANGE; // 投影する距離の最大値
+double MAX_REFLECT; // 投影する反射強度の最大値
+
+int MIN_PIX_NUM_SIGN; // 標識と判定するピクセル数の最小
+int MAX_PIX_NUM_SIGN; // 標識と判定するピクセル数の最大
+double MIN_ASPECT_RATIO_SIGN; // 標識と判定するアスペクト比の最小
+double MAX_ASPECT_RATIO_SIGN; // 標識と判定するアスペクト比の最大
 
 // 赤青黃のHSV表色系での閾値を設定
-constexpr int MIN_H_RED_01 = 1;
-constexpr int MAX_H_RED_01 = 10;
-constexpr int MIN_H_RED_02 = 165;
-constexpr int MAX_H_RED_02 = 180;
-constexpr int MIN_S_RED = 35;
-constexpr int MAX_S_RED = 255;
-constexpr int MIN_V_RED = 40;
-constexpr int MAX_V_RED = 255;
+int MIN_H_RED_01;
+int MAX_H_RED_01;
+int MIN_H_RED_02;
+int MAX_H_RED_02;
+int MIN_S_RED;
+int MAX_S_RED;
+int MIN_V_RED;
+int MAX_V_RED;
 
-constexpr int MIN_H_GREEN = 60;
-constexpr int MAX_H_GREEN = 95;
-constexpr int MIN_S_GREEN = 35;
-constexpr int MAX_S_GREEN = 255;
-constexpr int MIN_V_GREEN = 40;
-constexpr int MAX_V_GREEN = 255;
+int MIN_H_GREEN;
+int MAX_H_GREEN;
+int MIN_S_GREEN;
+int MAX_S_GREEN;
+int MIN_V_GREEN;
+int MAX_V_GREEN;
 
-constexpr int MIN_H_YELLOW = 0;
-constexpr int MAX_H_YELLOW = 60;
-constexpr int MIN_S_YELLOW = 40;
-constexpr int MAX_S_YELLOW = 255;
-constexpr int MIN_V_YELLOW = 145;
-constexpr int MAX_V_YELLOW = 255;
+int MIN_H_YELLOW;
+int MAX_H_YELLOW;
+int MIN_S_YELLOW;
+int MAX_S_YELLOW;
+int MIN_V_YELLOW;
+int MAX_V_YELLOW;
 
 // 信号が青なのか赤なのか判断するフラグ
 bool green_light_flag = false;
 bool red_light_flag = false;
 
 // IMAGE_THRESHフレーム連続で赤、青が認識されると信号とみなす
-constexpr int RED_IMAGE_THRESH = 0;
-constexpr int GREEN_IMAGE_THRESH = 0;
+int RED_IMAGE_THRESH;
+int GREEN_IMAGE_THRESH;
 
 // 赤、青信号が何フレーム連続で検出されたか数えるcount
 int red_cnt = 0;
@@ -96,20 +93,67 @@ std::string light_msg_state;
 
 // 信号の候補領域のピクセル数の閾値
 int pixel_num = 0;
-constexpr int MIN_PIX_NUM = 150;
-constexpr int MAX_PIX_NUM = 1200;
+int MIN_PIX_NUM;
+int MAX_PIX_NUM;
 
 // 信号の候補領域のアスペクト比の閾値
 // 横 : 縦 = ASPECT_RATIO : 1
 double aspect_ratio = .0f;
-constexpr double MIN_ASPECT_RATIO = 0.6;
-constexpr double MAX_ASPECT_RATIO = 1.6;
+double MIN_ASPECT_RATIO;
+double MAX_ASPECT_RATIO;
 
-constexpr int YELLOW_PIX_TH = 8; // 候補領域内の黄色画素ピクセル数の閾値
+int YELLOW_PIX_TH; // 候補領域内の黄色画素ピクセル数の閾値
 
-vector<TrackableObstacle> obstacles_buffer;
-vector<vector<LidarData>> points_buffer;
-
+void init(const std::string &cfg_path)
+{
+  prop::ptree pt;
+  prop::read_ini(cfg_path, pt);
+  if (auto v = pt.get_optional<int>("MIN_H_RED_02")) MIN_H_RED_02 = v.get();
+  if (auto v = pt.get_optional<double>("X_DIFF")) X_DIFF = v.get();
+  if (auto v = pt.get_optional<double>("Y_DIFF")) Y_DIFF = v.get();
+  if (auto v = pt.get_optional<double>("Z_DIFF")) Z_DIFF = v.get();
+  if (auto v = pt.get_optional<double>("ROLL")) ROLL = v.get();
+  if (auto v = pt.get_optional<double>("PITCH")) PITCH = v.get();
+  if (auto v = pt.get_optional<double>("YAW")) YAW = v.get();
+  if (auto v = pt.get_optional<int>("MIN_PIX_NUM_SIGN")) MIN_PIX_NUM_SIGN = v.get();
+  if (auto v = pt.get_optional<int>("MAX_PIX_NUM_SIGN")) MAX_PIX_NUM_SIGN = v.get();
+  if (auto v = pt.get_optional<double>("MIN_ASPECT_RATIO_SIGN")) MIN_ASPECT_RATIO_SIGN = v.get();
+  if (auto v = pt.get_optional<double>("MAX_ASPECT_RATIO_SIGN")) MAX_ASPECT_RATIO_SIGN = v.get();
+  if (auto v = pt.get_optional<double>("DETECT_HEIGHT_MIN")) DETECT_HEIGHT_MIN = v.get();
+  if (auto v = pt.get_optional<double>("DETECT_HEIGHT_MAX")) DETECT_HEIGHT_MAX = v.get();
+  if (auto v = pt.get_optional<double>("LIDAR_HEIGHT")) LIDAR_HEIGHT = v.get();
+  if (auto v = pt.get_optional<double>("REFLECT_THRESH")) REFLECT_THRESH = v.get();
+  if (auto v = pt.get_optional<double>("MIN_RANGE")) MIN_RANGE = v.get();
+  if (auto v = pt.get_optional<double>("MAX_RANGE")) MAX_RANGE = v.get();
+  if (auto v = pt.get_optional<double>("MAX_REFLECT")) MAX_REFLECT = v.get();
+  if (auto v = pt.get_optional<int>("MIN_H_RED_01")) MIN_H_RED_01 = v.get();
+  if (auto v = pt.get_optional<int>("MAX_H_RED_01")) MAX_H_RED_01 = v.get();
+  if (auto v = pt.get_optional<int>("MIN_H_RED_02")) MIN_H_RED_02 = v.get();
+  if (auto v = pt.get_optional<int>("MAX_H_RED_02")) MAX_H_RED_02 = v.get();
+  if (auto v = pt.get_optional<int>("MIN_S_RED")) MIN_S_RED = v.get();
+  if (auto v = pt.get_optional<int>("MAX_S_RED")) MAX_S_RED = v.get();
+  if (auto v = pt.get_optional<int>("MIN_V_RED")) MIN_V_RED = v.get();
+  if (auto v = pt.get_optional<int>("MAX_V_RED")) MAX_V_RED = v.get();
+  if (auto v = pt.get_optional<int>("MIN_H_GREEN")) MIN_H_GREEN = v.get();
+  if (auto v = pt.get_optional<int>("MAX_H_GREEN")) MAX_H_GREEN = v.get();
+  if (auto v = pt.get_optional<int>("MIN_S_GREEN")) MIN_S_GREEN = v.get();
+  if (auto v = pt.get_optional<int>("MAX_S_GREEN")) MAX_S_GREEN = v.get();
+  if (auto v = pt.get_optional<int>("MIN_V_GREEN")) MIN_V_GREEN = v.get();
+  if (auto v = pt.get_optional<int>("MAX_V_GREEN")) MAX_V_GREEN = v.get();
+  if (auto v = pt.get_optional<int>("MIN_H_YELLOW")) MIN_H_YELLOW = v.get();
+  if (auto v = pt.get_optional<int>("MAX_H_YELLOW")) MAX_H_YELLOW = v.get();
+  if (auto v = pt.get_optional<int>("MIN_S_YELLOW")) MIN_S_YELLOW = v.get();
+  if (auto v = pt.get_optional<int>("MAX_S_YELLOW")) MAX_S_YELLOW = v.get();
+  if (auto v = pt.get_optional<int>("MIN_V_YELLOW")) MIN_V_YELLOW = v.get();
+  if (auto v = pt.get_optional<int>("MAX_V_YELLOW")) MAX_V_YELLOW = v.get();
+  if (auto v = pt.get_optional<int>("RED_IMAGE_THRESH")) RED_IMAGE_THRESH= v.get();
+  if (auto v = pt.get_optional<int>("GREEN_IMAGE_THRESH")) GREEN_IMAGE_THRESH = v.get();
+  if (auto v = pt.get_optional<int>("MIN_PIX_NUM")) MIN_PIX_NUM = v.get();
+  if (auto v = pt.get_optional<int>("MAX_PIX_NUM")) MAX_PIX_NUM = v.get();
+  if (auto v = pt.get_optional<double>("MIN_ASPECT_RATIO")) MIN_ASPECT_RATIO = v.get();
+  if (auto v = pt.get_optional<double>("MAX_ASPECT_RATIO")) MAX_ASPECT_RATIO = v.get();
+  if (auto v = pt.get_optional<int>("YELLOW_PIX_TH")) YELLOW_PIX_TH = v.get();
+}
 /* ファイル名を取得 */
 void getFiles(const fs::path &path, const string &extension, vector<fs::path> &files)
 {
@@ -627,13 +671,15 @@ void addTextToImage(cv::Mat &image, const std::string &light_msg_state)
 }
 // ここまで信号認識用関数 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-int main(int argc,char **argv){
+int main(int argc, char **argv){
   vector<LidarData> points;
   vector<fs::path> files_png;
   vector<fs::path> files_pcd;
   Mat lidar_img;
   Mat lidar_range_img;
   Mat lidar_reflect_img;
+
+  init("../cfg/parameter.ini");
 
   /*** キャリブレーションパラメータの読み込み ***/
   // カメラ画像の歪み補正
